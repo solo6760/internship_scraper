@@ -214,6 +214,14 @@ class InternshipApp:
         console.print(table)
         console.print(f"\nProfile path: {os.path.abspath('config/profile.json')}")
         
+        ai_key = self.filler.ai.api_key if self.filler.ai else None
+        ai_status = f"{self.filler.ai.provider.upper()} (Active)" if ai_key else "Not Configured"
+        console.print(f"AI Assistant: [bold green]{ai_status}[/bold green]")
+
+        if Confirm.ask("Configure / Change AI API Key?", default=False):
+            self.filler.ai.api_key = None
+            self.filler.ai.prompt_user_for_key_if_missing()
+
         if Confirm.ask("Edit any profile field?", default=False):
             field = Prompt.ask("Enter field name (or 'cancel')", default="cancel")
             if field != "cancel":

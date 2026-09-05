@@ -14,6 +14,7 @@ from rich.text import Text
 from config.profile_loader import load_profile, get_flattened_profile
 from data.db import JobDatabase
 from scraper import detect_ats, InternshipScraper
+from ai_assistant import AIAssistant
 
 console = Console()
 
@@ -24,6 +25,7 @@ class FormAutoFiller:
         self.headless = headless
         self.resume_path = os.path.abspath(self.profile.get("resume_path", ""))
         self.db = JobDatabase()
+        self.ai = AIAssistant()
         self._validate_resume_path()
 
     def _validate_resume_path(self) -> None:
@@ -555,6 +557,26 @@ class FormAutoFiller:
                             ctx.evaluate("(el) => { el.style.outline = '2px solid #22c55e'; el.style.backgroundColor = '#f0fdf4'; }", inp)
                             continue
 
+                        # Check if element is a textarea or free-response screening question
+                        is_textarea = False
+                        try:
+                            is_textarea = (inp.evaluate("el => el.tagName.toLowerCase()") == "textarea")
+                        except Exception:
+                            pass
+                        is_question = bool(re.search(r"(\?|\bare you\b|\bwhy\b|\bdescribe\b|\bexplain\b|\bhow did\b|\btell us\b|\bplease specify\b|\bwhat are\b|\bwhat is your\b|\bif yes\b|\bshare with us\b|\bstatement\b|\bcover letter\b)", context, re.I)) or len(context.split()) > 7
+
+                        if is_textarea or is_question:
+                            if self.ai and self.ai.api_key:
+                                ai_ans = self.ai.answer_question(context, p)
+                                if ai_ans:
+                                    inp.fill(ai_ans)
+                                    filled += 1
+                                    ctx.evaluate("(el) => { el.style.outline = '2px solid #22c55e'; el.style.backgroundColor = '#f0fdf4'; }", inp)
+                                    console.print(f"[bold green][OK] AI answered screening question:[/bold green] '{context[:50]}...'")
+                                    continue
+                            # If no AI or question answered, avoid naive single-word matching (e.g. 'school' in a question sentence)
+                            continue
+
                         for pattern, value in patterns:
                             if not value:
                                 continue
@@ -889,6 +911,10 @@ class FormAutoFiller:
         """
         scraper = InternshipScraper(self.db)
         queue: List[str] = list(initial_urls) if initial_urls else []
+
+        # Check AI setup on first run
+        if not parse_mode and self.ai:
+            self.ai.prompt_user_for_key_if_missing()
 
         mode_badge = "[bold magenta]Mode: PARSE & PREVIEW (no browser)[/bold magenta]" if parse_mode else "[bold cyan]Mode: LIVE AUTOFILL & FEED[/bold cyan]"
 

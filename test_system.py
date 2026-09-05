@@ -5,6 +5,7 @@ Runs end-to-end verification without modifying production data.
 """
 
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -293,6 +294,22 @@ class TestGitHubScraper(unittest.TestCase):
         self.assertEqual(swe[0]["company"], "Google")
 
 
+class TestAIAssistant(unittest.TestCase):
+    def test_ai_initialization_and_mock(self):
+        """Verify AI Assistant initializes and handles missing keys gracefully."""
+        from ai_assistant import AIAssistant
+        assistant = AIAssistant()
+        # Without key, returns None safely
+        assistant.api_key = None
+        ans = assistant.answer_question("Are you open to starting full-time immediately?", {"university": "Purdue University"})
+        self.assertIsNone(ans)
+
+    def test_question_not_matched_as_school_name(self):
+        """Verify that a sentence question containing 'school' is recognized as a question and not a university name."""
+        question = "Are you open to starting full-time immediately after your internship? (either graduated or willing to take time off from school)*"
+        is_question = bool(re.search(r"(\?|\bare you\b|\bwhy\b|\bdescribe\b|\bexplain\b|\bhow did\b|\btell us\b|\bplease specify\b|\bwhat are\b|\bwhat is your\b|\bif yes\b|\bshare with us\b|\bstatement\b|\bcover letter\b)", question, re.I)) or len(question.split()) > 7
+        self.assertTrue(is_question)
+
 
 def run_tests():
     console.print(Panel("[bold cyan]Running Automated Test Suite for Internship Suite[/bold cyan]\n"
@@ -306,6 +323,7 @@ def run_tests():
     suite.addTests(loader.loadTestsFromTestCase(TestScraperLogic))
     suite.addTests(loader.loadTestsFromTestCase(TestGitHubScraper))
     suite.addTests(loader.loadTestsFromTestCase(TestAutofillEngine))
+    suite.addTests(loader.loadTestsFromTestCase(TestAIAssistant))
 
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)

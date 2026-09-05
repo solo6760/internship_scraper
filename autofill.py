@@ -33,8 +33,8 @@ class FormAutoFiller:
         else:
             console.print(f"[green][OK] Resume verified: {self.resume_path} ({os.path.getsize(self.resume_path):,} bytes)[/green]")
 
-    def display_jobs_preview(self, jobs: List[Dict[str, Any]], title: str = "Internships Preview", max_rows: int = 10) -> None:
-        """Render a clean, minimal preview table reading back parsed internships."""
+    def display_jobs_preview(self, jobs: List[Dict[str, Any]], title: str = "Internships Preview", max_rows: int = 10, show_full_urls: bool = True) -> None:
+        """Render a clean, minimal preview table reading back parsed internships with clickable links."""
         if not jobs:
             console.print("[yellow]No internships to display.[/yellow]")
             return
@@ -46,16 +46,15 @@ class FormAutoFiller:
         table.add_column("Track", width=12)
         table.add_column("Location", width=18)
         table.add_column("ATS", width=9)
-        table.add_column("Application URL", style="dim cyan", width=36)
+        table.add_column("Application Link", style="cyan", width=18)
 
         for i, j in enumerate(jobs[:max_rows], 1):
             cat = j.get("category", "other")
             cat_style = "yellow" if cat == "chip_design" else "magenta" if cat == "ai_ml" else "green" if cat == "software_dev" else "white"
             cat_label = "Hardware" if cat == "chip_design" else "AI/ML" if cat == "ai_ml" else "SWE" if cat == "software_dev" else cat
 
-            url_disp = j.get("url", "")
-            if len(url_disp) > 34:
-                url_disp = url_disp[:31] + "..."
+            full_url = j.get("url", "")
+            clickable_table_link = f"[link={full_url}][cyan underline]Open Link[/cyan underline][/link]" if full_url else "N/A"
 
             table.add_row(
                 str(i),
@@ -63,13 +62,21 @@ class FormAutoFiller:
                 str(j.get("title", "Role"))[:31],
                 f"[{cat_style}]{cat_label}[/{cat_style}]",
                 str(j.get("location", "USA"))[:17],
-                str(j.get("ats_type", detect_ats(j.get("url", ""))))[:8],
-                url_disp
+                str(j.get("ats_type", detect_ats(full_url)))[:8],
+                clickable_table_link
             )
 
         console.print(table)
         if len(jobs) > max_rows:
             console.print(f"[dim]... and {len(jobs) - max_rows} more internships found.[/dim]")
+
+        if show_full_urls:
+            console.print("\n[bold cyan]Clickable Direct Links (Full URLs):[/bold cyan]")
+            for i, j in enumerate(jobs[:max_rows], 1):
+                full_url = j.get("url", "")
+                comp = j.get("company", "Company")
+                role = j.get("title", "Role")
+                console.print(f"  [{i}] [bold white]{comp}[/bold white] - {role[:36]}:\n      [link={full_url}][cyan underline]{full_url}[/cyan underline][/link]")
 
     def _get_all_contexts(self, page: Page) -> List[Union[Page, Frame]]:
         """Return main page and all iframe frames to support embedded forms."""

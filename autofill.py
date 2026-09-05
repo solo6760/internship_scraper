@@ -784,13 +784,22 @@ class FormAutoFiller:
                 "args": browser_args,
                 "ignore_default_args": ["--enable-automation"]
             }
-            if os.path.exists("/usr/bin/google-chrome"):
-                launch_kwargs["executable_path"] = "/usr/bin/google-chrome"
+            mac_chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            linux_chrome = "/usr/bin/google-chrome"
+            if os.path.exists(linux_chrome):
+                launch_kwargs["executable_path"] = linux_chrome
+            elif os.path.exists(mac_chrome):
+                launch_kwargs["executable_path"] = mac_chrome
 
             browser = p.chromium.launch(**launch_kwargs)
+            ua = (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+                if sys.platform == "darwin"
+                else "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+            )
             context = browser.new_context(
                 viewport={"width": 1366, "height": 850},
-                user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+                user_agent=ua
             )
             page = context.new_page()
             page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")

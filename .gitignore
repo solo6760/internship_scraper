@@ -1,0 +1,14 @@
+# Environments & Python cache
+__pycache__/
+*.pyc
+.venv/
+
+# Private personal information & resumes
+config/profile.json
+data/*.pdf
+data/*.db
+data/applications.db
+
+# Text export dumps
+*.txt
+!requirements.txt

@@ -1,0 +1,56 @@
+{
+  "personal": {
+    "first_name": "Jane",
+    "last_name": "Doe",
+    "full_name": "Jane Doe",
+    "email": "jane.doe@example.com",
+    "phone": "5551234567",
+    "birthday": {
+      "month": "01",
+      "day": "01",
+      "year": "2005",
+      "formatted_slash": "01/01/2005",
+      "formatted_dash": "2005-01-01",
+      "formatted_picker": "01 Jan 2005"
+    },
+    "address": {
+      "street": "123 University Ave",
+      "line2": "",
+      "city": "West Lafayette",
+      "state": "IN",
+      "state_full": "Indiana",
+      "zip_code": "47906",
+      "country": "United States"
+    }
+  },
+  "education": {
+    "university": "Purdue University",
+    "degree": "Bachelor of Science",
+    "major": "Computer Engineering",
+    "minor": "",
+    "gpa": "3.80",
+    "start_year": "2023",
+    "graduation_year": "2027",
+    "graduation_month": "May",
+    "graduation_date_formatted": "05/2027"
+  },
+  "links": {
+    "linkedin": "https://linkedin.com/in/example",
+    "github": "https://github.com/example",
+    "portfolio": "",
+    "other": ""
+  },
+  "demographics": {
+    "gender": "Decline to Self-Identify",
+    "race_ethnicity": "Decline to Self-Identify",
+    "veteran_status": "No",
+    "disability_status": "No",
+    "authorized_to_work_in_us": "Yes",
+    "requires_sponsorship": "No",
+    "is_18_or_older": "Yes",
+    "previously_employed": "No"
+  },
+  "documents": {
+    "resume_path": "data/resume.pdf"
+  }
+}

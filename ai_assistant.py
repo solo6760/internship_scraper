@@ -7,7 +7,10 @@ from rich.prompt import Prompt, Confirm
 
 console = Console()
 
-DEFAULT_GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
+DEFAULT_OPENAI_MODEL = "5.6-luna"
+DEFAULT_LOW_TEMPERATURE = 0.1
+
 DEFAULT_OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 
 class AIAssistant:
@@ -15,6 +18,9 @@ class AIAssistant:
         self.config_path = config_path
         self.api_key: Optional[str] = None
         self.provider: str = "gemini"
+        self.gemini_model: str = DEFAULT_GEMINI_MODEL
+        self.openai_model: str = DEFAULT_OPENAI_MODEL
+        self.temperature: float = DEFAULT_LOW_TEMPERATURE
         self._load_config()
 
     def _load_config(self) -> None:
@@ -38,6 +44,9 @@ class AIAssistant:
                 if ai_settings.get("api_key"):
                     self.api_key = ai_settings.get("api_key")
                     self.provider = ai_settings.get("provider", "gemini")
+                    self.gemini_model = ai_settings.get("gemini_model", DEFAULT_GEMINI_MODEL)
+                    self.openai_model = ai_settings.get("openai_model", DEFAULT_OPENAI_MODEL)
+                    self.temperature = ai_settings.get("temperature", DEFAULT_LOW_TEMPERATURE)
             except Exception:
                 pass
 
@@ -60,8 +69,12 @@ class AIAssistant:
 
         provider = Prompt.ask("Choose provider", choices=["gemini", "openai"], default="gemini")
         if provider == "gemini":
+            self.gemini_model = "gemini-3.1-flash-lite"
+            console.print(f"[dim]Default model: [bold cyan]{self.gemini_model}[/bold cyan][/dim]")
             console.print("[dim]Tip: You can get a free Gemini API key at https://aistudio.google.com/[/dim]")
         else:
+            self.openai_model = "5.6-luna"
+            console.print(f"[dim]Default model: [bold cyan]{self.openai_model}[/bold cyan] (low temperature: {self.temperature})[/dim]")
             console.print("[dim]Tip: You can get an OpenAI key at https://platform.openai.com/api-keys[/dim]")
 
         key = Prompt.ask(f"Enter your {provider.upper()} API Key (or press Enter to skip)", default="").strip()
@@ -80,6 +93,9 @@ class AIAssistant:
                     data = json.load(f)
                 data["ai_settings"] = {
                     "provider": provider,
+                    "gemini_model": self.gemini_model,
+                    "openai_model": self.openai_model,
+                    "temperature": self.temperature,
                     "api_key": key
                 }
                 with open(self.config_path, "w", encoding="utf-8") as f:
@@ -142,46 +158,62 @@ class AIAssistant:
             return None
 
     def _call_gemini(self, prompt: str) -> Optional[str]:
-        url = f"{DEFAULT_GEMINI_ENDPOINT}?key={self.api_key}"
-        headers = {"Content-Type": "application/json"}
-        payload = {
-            "contents": [{
-                "parts": [{"text": prompt}]
-            }],
-            "generationConfig": {
-                "temperature": 0.2,
-                "maxOutputTokens": 200
+        # Defaults to 3.1 flash lite with low temperature
+        models_to_try = [self.gemini_model, "3.1-flash-lite", "gemini-1.5-flash"]
+        for m in models_to_try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={self.api_key}"
+            headers = {"Content-Type": "application/json"}
+            payload = {
+                "contents": [{
+                    "parts": [{"text": prompt}]
+                }],
+                "generationConfig": {
+                    "temperature": self.temperature,
+                    "maxOutputTokens": 200
+                }
             }
-        }
-        res = requests.post(url, headers=headers, json=payload, timeout=8)
-        if res.status_code == 200:
-            data = res.json()
-            candidates = data.get("candidates", [])
-            if candidates:
-                content = candidates[0].get("content", {})
-                parts = content.get("parts", [])
-                if parts:
-                    return parts[0].get("text", "").strip().strip('"')
+            try:
+                res = requests.post(url, headers=headers, json=payload, timeout=8)
+                if res.status_code == 200:
+                    data = res.json()
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        content = candidates[0].get("content", {})
+                        parts = content.get("parts", [])
+                        if parts:
+                            return parts[0].get("text", "").strip().strip('"')
+                elif res.status_code == 404:
+                    continue
+            except Exception:
+                continue
         return None
 
     def _call_openai(self, prompt: str) -> Optional[str]:
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}"
-        }
-        payload = {
-            "model": "gpt-4o-mini",
-            "messages": [
-                {"role": "system", "content": "You are a professional assistant answering job application screening questions directly, truthfully, and concisely."},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.2,
-            "max_tokens": 200
-        }
-        res = requests.post(DEFAULT_OPENAI_ENDPOINT, headers=headers, json=payload, timeout=8)
-        if res.status_code == 200:
-            data = res.json()
-            choices = data.get("choices", [])
-            if choices:
-                return choices[0].get("message", {}).get("content", "").strip().strip('"')
+        # Defaults to 5.6 luna with low temperature
+        models_to_try = [self.openai_model, "5.6-luna", "gpt-5.6-luna", "gpt-4o-mini"]
+        for m in models_to_try:
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}"
+            }
+            payload = {
+                "model": m,
+                "messages": [
+                    {"role": "system", "content": "You are a professional assistant answering job application screening questions directly, truthfully, and concisely."},
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": self.temperature,
+                "max_tokens": 200
+            }
+            try:
+                res = requests.post(DEFAULT_OPENAI_ENDPOINT, headers=headers, json=payload, timeout=8)
+                if res.status_code == 200:
+                    data = res.json()
+                    choices = data.get("choices", [])
+                    if choices:
+                        return choices[0].get("message", {}).get("content", "").strip().strip('"')
+                elif res.status_code == 404 or "model" in res.text.lower():
+                    continue
+            except Exception:
+                continue
         return None

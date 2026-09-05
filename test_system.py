@@ -299,6 +299,9 @@ class TestAIAssistant(unittest.TestCase):
         """Verify AI Assistant initializes and handles missing keys gracefully."""
         from ai_assistant import AIAssistant
         assistant = AIAssistant()
+        self.assertEqual(assistant.gemini_model, "gemini-3.1-flash-lite")
+        self.assertEqual(assistant.openai_model, "5.6-luna")
+        self.assertEqual(assistant.temperature, 0.1)
         # Without key, returns None safely
         assistant.api_key = None
         ans = assistant.answer_question("Are you open to starting full-time immediately?", {"university": "Purdue University"})

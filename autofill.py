@@ -91,9 +91,10 @@ class FormAutoFiller:
         except Exception:
             return [page]
 
-    def _inject_status_banner(self, page: Page, filled_count: int, resume_uploaded: bool, ats_type: str = "Generic") -> None:
+    def _inject_status_banner(self, page: Page, filled_count: int, resume_uploaded: bool, ats_type: str = "Generic", step_num: int = 1) -> None:
         """Inject an overlay badge showing autofill stats and styling."""
-        status_text = f"Autofill: {filled_count} fields populated"
+        step_prefix = f"Page {step_num} | " if step_num > 1 else ""
+        status_text = f"Autofill: {step_prefix}{filled_count} fields populated"
         if resume_uploaded:
             status_text += " | Resume attached"
         
@@ -780,8 +781,204 @@ class FormAutoFiller:
 
         return filled
 
+    def _is_login_page(self, page: Page) -> bool:
+        """Detect if the current page is an authentication, sign-in, or login screen."""
+        contexts = self._get_all_contexts(page)
+        for ctx in contexts:
+            try:
+                # 1. Look for visible password fields
+                passwords = ctx.query_selector_all('input[type="password"]')
+                for pw in passwords:
+                    if pw.is_visible():
+                        return True
+
+                # 2. Look for ATS login / account creation buttons
+                login_btn_selectors = [
+                    'button[data-automation-id="signInSubmitButton"]',
+                    'button[data-automation-id="signInButton"]',
+                    'button[data-automation-id="createAccountSubmitButton"]',
+                    '#signInSubmitButton',
+                    'input[data-automation-id="signInSubmitButton"]'
+                ]
+                for sel in login_btn_selectors:
+                    el = ctx.query_selector(sel)
+                    if el and el.is_visible():
+                        return True
+            except Exception:
+                pass
+
+        # 3. Check URL pathname for auth/login indicators
+        try:
+            url_path = urlparse(page.url).path.lower()
+            if any(k in url_path for k in ["/login", "/signin", "/auth/", "/logon"]) and not any(k in url_path for k in ["/job/", "/apply", "/application"]):
+                return True
+        except Exception:
+            pass
+
+        return False
+
+    def _wait_for_login_if_needed(self, page: Page) -> bool:
+        """
+        Check if application requires login or landing page navigation.
+        If a login screen is detected, pauses and notifies the user to log in in Chrome.
+        Monitors DOM until login completes or user signals continuation.
+        """
+        # Step 1: Check for landing page triggers like Workday "Apply Manually"
+        try:
+            apply_btn_selectors = [
+                'button[data-automation-id="applyManually"]',
+                'a[data-automation-id="applyManually"]',
+                'button:has-text("Apply Manually")',
+                'a:has-text("Apply Manually")',
+                'a:has-text("Apply with Resume")'
+            ]
+            for sel in apply_btn_selectors:
+                btn = page.query_selector(sel)
+                if btn and btn.is_visible():
+                    console.print(f"[cyan][*] Portal landing page detected: Clicking '{btn.inner_text().strip() or 'Apply'}'...[/cyan]")
+                    btn.click()
+                    page.wait_for_load_state("domcontentloaded", timeout=8000)
+                    time.sleep(2)
+                    break
+        except Exception:
+            pass
+
+        # Step 2: Check if login page is currently presented
+        if not self._is_login_page(page):
+            return False
+
+        console.print("\n" + "=" * 60)
+        console.print("[bold yellow][WARN] Login / Authentication Screen Detected![/bold yellow]")
+        console.print("  >> Please log in or create an account in the opened browser window.")
+        console.print("  >> Autofill will start automatically as soon as you sign in.")
+        console.print("=" * 60)
+
+        # Inject HUD badge informing user in browser
+        js_badge = """
+        (() => {
+            let b = document.getElementById('ag-autofill-banner');
+            if (!b) {
+                b = document.createElement('div');
+                b.id = 'ag-autofill-banner';
+                b.style.position = 'fixed';
+                b.style.top = '16px';
+                b.style.right = '16px';
+                b.style.zIndex = '99999999';
+                b.style.backgroundColor = '#78350f';
+                b.style.color = '#fef08a';
+                b.style.padding = '14px 22px';
+                b.style.borderRadius = '12px';
+                b.style.boxShadow = '0 12px 30px rgba(0,0,0,0.6)';
+                b.style.fontFamily = 'system-ui, sans-serif';
+                b.style.fontSize = '14px';
+                b.style.fontWeight = '600';
+                b.style.border = '1.5px solid #eab308';
+                document.body.appendChild(b);
+            }
+            b.innerHTML = 'Authentication Required<br><span style="font-size:12px;font-weight:400;color:#fde047">Log in above. Autofill will start immediately upon login.</span>';
+        })();
+        """
+        try:
+            page.evaluate(js_badge)
+        except Exception:
+            pass
+
+        # In headless mode, do not block indefinitely
+        if self.headless:
+            return True
+
+        # Step 3: Monitor until password field disappears or application form appears
+        poll_interval = 1.5
+        max_polls = 200  # ~5 minutes
+        for _ in range(max_polls):
+            time.sleep(poll_interval)
+            try:
+                if not self._is_login_page(page):
+                    time.sleep(2)
+                    console.print("[bold green][OK] Login completed! Proceeding with autofill...[/bold green]")
+                    return True
+            except Exception:
+                pass
+
+        return True
+
+    def _find_next_button(self, page: Page) -> Optional[ElementHandle]:
+        """
+        Locate 'Next', 'Save and Continue', or 'Continue' navigation button in multi-page wizards.
+        Ensures final 'Submit' / 'Submit Application' buttons are NOT matched as a next button.
+        """
+        contexts = self._get_all_contexts(page)
+        
+        selectors = [
+            'button[data-automation-id="bottom-navigation-next-button"]',
+            'button:has-text("Save and Continue")',
+            'button:has-text("Save & Continue")',
+            'button:has-text("Next Step")',
+            'button:has-text("Next Page")',
+            'button:has-text("Next")',
+            'button:has-text("Continue")',
+            'a:has-text("Save and Continue")',
+            'a:has-text("Next")',
+            'a:has-text("Continue")',
+            'input[type="submit"][value*="Save and Continue" i]',
+            'input[type="button"][value*="Save and Continue" i]',
+            'input[type="submit"][value*="Next" i]',
+            'input[type="button"][value*="Next" i]',
+            'input[type="submit"][value*="Continue" i]',
+            'input[type="button"][value*="Continue" i]'
+        ]
+
+        disallowed_pattern = re.compile(r"\b(submit|finish|apply now|confirm application|done)\b", re.I)
+
+        for ctx in contexts:
+            for sel in selectors:
+                try:
+                    elems = ctx.query_selector_all(sel)
+                    for btn in elems:
+                        if btn.is_visible() and btn.is_enabled():
+                            txt = (btn.inner_text() or btn.get_attribute("value") or "").strip()
+                            # If text contains submit keywords and is not "Save and Continue", skip
+                            if disallowed_pattern.search(txt) and "save and continue" not in txt.lower():
+                                continue
+                            return btn
+                except Exception:
+                    pass
+
+        return None
+
+    def _fill_current_step(self, page: Page, ats_type: str = "generic", step_num: int = 1) -> Tuple[int, bool]:
+        """
+        Execute one pass of ATS form engines + heuristic fill + AI questions on currently visible DOM.
+        Returns (fields_filled_in_step, resume_uploaded).
+        """
+        resume_uploaded = self.upload_resume(page)
+        fields_count = 0
+        url_lower = page.url.lower()
+
+        # Run ATS-specific engines
+        if "greenhouse.io" in url_lower or "gh_jid" in url_lower:
+            fields_count += self.fill_greenhouse_form(page)
+        elif "lever.co" in url_lower:
+            fields_count += self.fill_lever_form(page)
+        elif "ashbyhq.com" in url_lower:
+            fields_count += self.fill_ashby_form(page)
+        elif "myworkdayjobs.com" in url_lower or "workday" in url_lower:
+            fields_count += self.fill_workday_form(page)
+        elif "smartrecruiters.com" in url_lower:
+            fields_count += self.fill_smartrecruiters_form(page)
+        elif "tesla.com" in url_lower:
+            fields_count += self.fill_tesla_form(page)
+
+        # Run Universal Heuristics (inputs, textareas, AI screening questions, combos, radios, checkboxes)
+        fields_count += self.fill_generic_heuristics(page)
+
+        # Inject / update status banner in browser
+        self._inject_status_banner(page, fields_count, resume_uploaded, ats_type=ats_type, step_num=step_num)
+
+        return fields_count, resume_uploaded
+
     def autofill_page(self, url: str) -> Dict[str, Any]:
-        """Open application page, autofill all personal info, and upload resume."""
+        """Open application page, wait for login if needed, autofill wizard pages, and guide review."""
         ats_type = detect_ats(url)
         console.print(f"\n[bold cyan]>> Opening application URL:[/bold cyan] {url}")
         console.print(f"     ATS Detected: [bold yellow]{ats_type.upper()}[/bold yellow]")
@@ -838,51 +1035,85 @@ class FormAutoFiller:
                     console.print("    Please solve any visible CAPTCHA or verification challenge in the browser window.")
                     time.sleep(4)
 
-                # 1. Upload Resume
-                resume_uploaded = self.upload_resume(page)
-                results["resume_uploaded"] = resume_uploaded
-                time.sleep(1)
+                # Step 1: Detect and wait for login / landing page if needed
+                self._wait_for_login_if_needed(page)
 
-                # 2. Run ATS-Specific Form Engines
-                fields_count = 0
-                url_lower = url.lower()
-                if "greenhouse.io" in url_lower or "gh_jid" in url_lower:
-                    fields_count += self.fill_greenhouse_form(page)
-                elif "lever.co" in url_lower:
-                    fields_count += self.fill_lever_form(page)
-                elif "ashbyhq.com" in url_lower:
-                    fields_count += self.fill_ashby_form(page)
-                elif "myworkdayjobs.com" in url_lower or "workday" in url_lower:
-                    fields_count += self.fill_workday_form(page)
-                elif "smartrecruiters.com" in url_lower:
-                    fields_count += self.fill_smartrecruiters_form(page)
-                elif "tesla.com" in url_lower:
-                    fields_count += self.fill_tesla_form(page)
+                # Step 2: Multi-Page Autofill Loop
+                step = 1
+                total_fields = 0
+                any_resume_uploaded = False
 
-                # 3. Run Universal Heuristic Matcher
-                fields_count += self.fill_generic_heuristics(page)
-                results["fields_filled"] = fields_count
+                while True:
+                    console.print(f"\n[bold cyan]>> Running Autofill on Page {step}...[/bold cyan]")
+                    step_fields, step_resume = self._fill_current_step(page, ats_type=ats_type, step_num=step)
+                    total_fields += step_fields
+                    if step_resume:
+                        any_resume_uploaded = True
 
-                console.print(f"[bold green][OK] Successfully autofilled {fields_count} fields.[/bold green]")
-                if resume_uploaded:
-                    console.print("[bold green][OK] Resume PDF attached successfully.[/bold green]")
-                else:
-                    console.print("[yellow][WARN] Resume file input not detected or requires manual attachment.[/yellow]")
+                    console.print(f"[bold green][OK] Page {step}: Autofilled {step_fields} fields.[/bold green]")
+                    if any_resume_uploaded:
+                        console.print("[bold green][OK] Resume PDF attached.[/bold green]")
 
-                # Inject HUD badge
-                self._inject_status_banner(page, fields_count, resume_uploaded, ats_type=ats_type)
+                    # In headless mode or test environments, single-pass completes unless testing navigation
+                    if self.headless:
+                        break
+
+                    # Check for multi-page wizard "Next" / "Save and Continue" button
+                    next_btn = self._find_next_button(page)
+                    if next_btn:
+                        btn_text = (next_btn.inner_text() or next_btn.get_attribute("value") or "Next").strip()
+                        console.print(f"\n[cyan][*] Multi-page flow: Next step button detected: '[bold white]{btn_text}[/bold white]'[/cyan]")
+                        
+                        action = Prompt.ask(
+                            f"Page {step} autofilled. Select action",
+                            choices=["next", "rescan", "finish"],
+                            default="next"
+                        )
+                        if action == "next":
+                            try:
+                                next_btn.click()
+                                page.wait_for_load_state("domcontentloaded", timeout=15000)
+                                time.sleep(2.5)
+                                # Check if login triggered mid-flow
+                                self._wait_for_login_if_needed(page)
+                                step += 1
+                                continue
+                            except Exception as click_err:
+                                console.print(f"[yellow][WARN] Could not auto-advance to next page: {click_err}[/yellow]")
+                                break
+                        elif action == "rescan":
+                            console.print("[dim][*] Re-scanning current page view...[/dim]")
+                            continue
+                        else:
+                            # User selected finish / manual submission
+                            break
+                    else:
+                        # No further "Next" button found; reached final review / submit page
+                        break
+
+                results["fields_filled"] = total_fields
+                results["resume_uploaded"] = any_resume_uploaded
 
                 if not self.headless:
-                    console.print("\n" + "-" * 60)
+                    console.print("\n" + "=" * 60)
                     console.print("[bold cyan]BROWSER READY FOR REVIEW & SUBMISSION[/bold cyan]")
-                    console.print("1. Review the populated fields (highlighted in green).")
-                    console.print("2. Fill any unique custom essay / screening questions.")
+                    console.print("1. Review the populated fields and answers in Chrome.")
+                    console.print("2. Make any final manual adjustments if needed.")
                     console.print("3. Click [bold green]'Submit Application'[/bold green] when ready.")
-                    console.print("-" * 60)
-                    try:
-                        input("\nPress [Enter] in this terminal once you finish submitting to close browser...")
-                    except (KeyboardInterrupt, EOFError):
-                        pass
+                    console.print("=" * 60)
+                    console.print("[dim]Tip: Type 'r' and press Enter to re-scan/autofill the current page, or press Enter when done submitting.[/dim]")
+
+                    while True:
+                        try:
+                            user_cmd = input("\nPress [Enter] when submitted (or type 'r' to re-scan page): ").strip().lower()
+                            if user_cmd == 'r':
+                                console.print("[dim][*] Re-running autofill on active view...[/dim]")
+                                rf, ru = self._fill_current_step(page, ats_type=ats_type, step_num=step)
+                                console.print(f"[green][OK] Re-scan filled {rf} fields.[/green]")
+                            else:
+                                break
+                        except (KeyboardInterrupt, EOFError):
+                            break
 
                 results["status"] = "COMPLETED"
 

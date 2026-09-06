@@ -239,6 +239,81 @@ class TestAutofillEngine(unittest.TestCase):
         ]
         filler.display_jobs_preview(sample_jobs, title="Test Preview", max_rows=5)
 
+    def test_is_login_page_detection(self):
+        """Verify detection of login / authentication screens vs regular application pages."""
+        filler = FormAutoFiller(headless=True)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+
+            # Test 1: Page with password input is detected as login screen
+            page.set_content("""
+            <html>
+                <body>
+                    <h2>Sign In to Your Account</h2>
+                    <input type="text" name="username" id="username" />
+                    <input type="password" name="password" id="password" />
+                    <button id="signInSubmitButton">Sign In</button>
+                </body>
+            </html>
+            """)
+            self.assertTrue(filler._is_login_page(page), "Expected page with password field to be detected as login page")
+
+            # Test 2: Standard job application page without password is not a login page
+            page.set_content("""
+            <html>
+                <body>
+                    <h2>Job Application Form</h2>
+                    <input type="text" name="first_name" />
+                    <input type="text" name="last_name" />
+                    <button type="submit">Submit</button>
+                </body>
+            </html>
+            """)
+            self.assertFalse(filler._is_login_page(page), "Standard application page should not be detected as login page")
+            browser.close()
+
+    def test_find_next_button_detection(self):
+        """Verify detection of 'Next' / 'Save and Continue' wizard buttons and exclusion of final 'Submit'."""
+        filler = FormAutoFiller(headless=True)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+
+            # Test 1: Workday 'Save and Continue' / next button
+            page.set_content("""
+            <html>
+                <body>
+                    <button data-automation-id="bottom-navigation-next-button">Save and Continue</button>
+                </body>
+            </html>
+            """)
+            next_btn = filler._find_next_button(page)
+            self.assertIsNotNone(next_btn, "Should find Workday next navigation button")
+            self.assertEqual(next_btn.inner_text().strip(), "Save and Continue")
+
+            # Test 2: Generic 'Next' button
+            page.set_content("""
+            <html>
+                <body>
+                    <button type="button">Next Step</button>
+                </body>
+            </html>
+            """)
+            next_btn = filler._find_next_button(page)
+            self.assertIsNotNone(next_btn, "Should find 'Next Step' button")
+
+            # Test 3: Final submit button should NOT be detected as a next step
+            page.set_content("""
+            <html>
+                <body>
+                    <button type="submit">Submit Application</button>
+                </body>
+            </html>
+            """)
+            self.assertIsNone(filler._find_next_button(page), "Final 'Submit Application' must not be matched as next button")
+            browser.close()
+
 
 class TestGitHubScraper(unittest.TestCase):
     def setUp(self):

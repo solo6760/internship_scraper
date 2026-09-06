@@ -314,6 +314,33 @@ class TestAutofillEngine(unittest.TestCase):
             self.assertIsNone(filler._find_next_button(page), "Final 'Submit Application' must not be matched as next button")
             browser.close()
 
+    def test_country_selection_skips_minor_outlying_islands(self):
+        """Verify country dropdown selection chooses USA and explicitly rejects US Minor Outlying Islands."""
+        filler = FormAutoFiller(headless=True)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+
+            # Test 1: Select element where Minor Outlying Islands appears first alphabetically
+            page.set_content("""
+            <html>
+                <body>
+                    <label for="country">Country</label>
+                    <select id="country" name="country">
+                        <option value="">Select a country</option>
+                        <option value="UM">United States Minor Outlying Islands</option>
+                        <option value="US">United States of America</option>
+                        <option value="CA">Canada</option>
+                    </select>
+                </body>
+            </html>
+            """)
+            filler.fill_generic_heuristics(page)
+            selected_val = page.eval_on_selector("#country", "el => el.value")
+            self.assertEqual(selected_val, "US", "Country select should select 'United States of America' (US), never Minor Outlying Islands")
+
+            browser.close()
+
 
 class TestGitHubScraper(unittest.TestCase):
     def setUp(self):

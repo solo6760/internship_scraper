@@ -284,6 +284,56 @@ class FormAutoFiller:
             except Exception:
                 pass
 
+        # Dedicated Workday Country Dropdown Handler
+        try:
+            country_btn_selectors = [
+                'button[data-automation-id="countryDropdown"]',
+                'button[data-automation-id*="addressSection_country"]',
+                'div[data-automation-id="formField-addressSection_country"] button',
+                'div[data-automation-id="formField-country"] button',
+                'div[data-automation-id="countryDropdown"]',
+                'button[aria-haspopup="listbox"][data-automation-id*="country" i]',
+            ]
+            for c_sel in country_btn_selectors:
+                c_btn = page.query_selector(c_sel)
+                if c_btn and c_btn.is_visible():
+                    current_text = (c_btn.inner_text() or "").strip().lower()
+                    if ("united states" in current_text or "usa" in current_text) and "minor outlying" not in current_text:
+                        break
+
+                    c_btn.click()
+                    time.sleep(0.4)
+
+                    search_box = page.query_selector('input[data-automation-id="searchBox"], input[role="searchbox"]')
+                    if search_box and search_box.is_visible():
+                        search_box.fill("United States of America")
+                        time.sleep(0.3)
+                        page.keyboard.press("Enter")
+                        time.sleep(0.4)
+                    else:
+                        page.keyboard.type("United States of America", delay=20)
+                        time.sleep(0.3)
+
+                    options = page.query_selector_all('[data-automation-id="promptOption"], [role="option"], div[id*="promptOption"]')
+                    opt_clicked = False
+                    for opt in options:
+                        txt = (opt.inner_text() or opt.get_attribute("data-automation-label") or "").strip().lower()
+                        if "minor outlying" in txt:
+                            continue
+                        if "united states of america" in txt or txt == "united states" or txt == "usa":
+                            opt.click()
+                            opt_clicked = True
+                            filled += 1
+                            break
+
+                    if not opt_clicked:
+                        page.keyboard.press("Enter")
+                        filled += 1
+                    time.sleep(0.4)
+                    break
+        except Exception:
+            pass
+
         return filled
 
     def fill_greenhouse_form(self, page: Page) -> int:
@@ -662,6 +712,18 @@ class FormAutoFiller:
                                     filled += 1
                                     break
 
+                        # Country
+                        elif re.search(r"\b(country|nation)\b", context, re.I):
+                            for opt in sel.query_selector_all("option"):
+                                txt = (opt.text_content() or "").lower()
+                                val = (opt.get_attribute("value") or "").lower()
+                                if "minor outlying" in txt or "minor outlying" in val:
+                                    continue
+                                if "united states of america" in txt or txt.strip() == "united states" or "usa" in txt or val in ["us", "usa"]:
+                                    sel.select_option(value=opt.get_attribute("value") or opt.text_content())
+                                    filled += 1
+                                    break
+
                         # Degree
                         elif re.search(r"\b(degree|education\s*level)\b", context, re.I):
                             for opt in sel.query_selector_all("option"):
@@ -685,10 +747,12 @@ class FormAutoFiller:
                             continue
 
                         target_val = None
+                        is_country = False
                         if re.search(r"\b(state|province)\b", context, re.I):
                             target_val = p["state_full"]
-                        elif re.search(r"\b(country)\b", context, re.I):
-                            target_val = "United States"
+                        elif re.search(r"\b(country|nation)\b", context, re.I):
+                            target_val = "United States of America"
+                            is_country = True
                         elif re.search(r"\b(gender)\b", context, re.I):
                             target_val = "Male"
                         elif re.search(r"\b(authorized|work\s*auth)\b", context, re.I):
@@ -697,11 +761,42 @@ class FormAutoFiller:
                             target_val = "No"
 
                         if target_val:
+                            # Skip if country is already selected as USA and not minor outlying
+                            curr_val = (combo.inner_text() or "").strip().lower()
+                            if is_country and ("united states" in curr_val or "usa" in curr_val) and "minor outlying" not in curr_val:
+                                continue
+
                             combo.click()
-                            time.sleep(0.3)
-                            page.keyboard.type(target_val)
-                            time.sleep(0.2)
-                            page.keyboard.press("Enter")
+                            time.sleep(0.35)
+
+                            # If search input opened in a dialog/dropdown
+                            search_inp = page.query_selector('input[data-automation-id="searchBox"], input[role="searchbox"]')
+                            if search_inp and search_inp.is_visible():
+                                search_inp.fill(target_val)
+                                time.sleep(0.3)
+                                if not is_country:
+                                    page.keyboard.press("Enter")
+                            else:
+                                page.keyboard.type(target_val, delay=20)
+                                time.sleep(0.3)
+
+                            # If country, explicitly find and click the option that is NOT Minor Outlying Islands
+                            if is_country:
+                                opt_clicked = False
+                                options = page.query_selector_all('[data-automation-id="promptOption"], [role="option"], div[id*="promptOption"], li[role="option"]')
+                                for opt in options:
+                                    opt_txt = (opt.inner_text() or opt.get_attribute("data-automation-label") or "").strip().lower()
+                                    if "minor outlying" in opt_txt:
+                                        continue
+                                    if "united states of america" in opt_txt or opt_txt == "united states" or opt_txt == "usa":
+                                        opt.click()
+                                        opt_clicked = True
+                                        break
+                                if not opt_clicked:
+                                    page.keyboard.press("Enter")
+                            else:
+                                page.keyboard.press("Enter")
+
                             filled += 1
                     except Exception:
                         pass

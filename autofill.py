@@ -152,10 +152,10 @@ class FormAutoFiller:
                 let parentLabel = el.closest('label');
                 if (parentLabel) text += ' ' + parentLabel.innerText;
                 
-                // Container headings / spans
-                let container = el.closest('.form-group, .field, .input-container, .application-question, [data-automation-id="formField"], div');
+                // Immediate field container only (never generic div or broad sections)
+                let container = el.closest('.form-group, .field, .input-container, .application-question, [data-automation-id*="formField" i], [data-automation-id*="FormField" i], fieldset');
                 if (container) {
-                    let headers = container.querySelectorAll('label, span, p, h3, h4, legend');
+                    let headers = container.querySelectorAll('label, [data-automation-id="formLabel"], .control-label, legend');
                     headers.forEach(h => text += ' ' + h.innerText);
                 }
                 return text.toLowerCase();
@@ -253,11 +253,11 @@ class FormAutoFiller:
         contexts = self._get_all_contexts(page)
         for ctx in contexts:
             workday_mappings = [
-                ('input[data-automation-id*="legalNameSection_firstName"], input[data-automation-id="firstName"]', p["first_name"]),
-                ('input[data-automation-id*="legalNameSection_lastName"], input[data-automation-id="lastName"]', p["last_name"]),
-                ('input[data-automation-id*="addressSection_addressLine1"], input[data-automation-id="addressLine1"]', p["street_address"]),
-                ('input[data-automation-id*="addressSection_city"], input[data-automation-id="city"]', p["city"]),
-                ('input[data-automation-id*="addressSection_postalCode"], input[data-automation-id="postalCode"]', p["zip_code"]),
+                ('input[data-automation-id*="legalNameSection_firstName"], input[data-automation-id="firstName"], input[id*="firstName" i]', p["first_name"]),
+                ('input[data-automation-id*="legalNameSection_lastName"], input[data-automation-id="lastName"], input[id*="lastName" i]', p["last_name"]),
+                ('input[data-automation-id*="addressSection_addressLine1"], input[data-automation-id="addressLine1"], input[data-automation-id*="addressLine1" i], input[id*="addressLine1" i]', p["street_address"]),
+                ('input[data-automation-id*="addressSection_city"], input[data-automation-id="city"], input[data-automation-id*="city" i], input[id*="city" i]', p["city"]),
+                ('input[data-automation-id*="addressSection_postalCode"], input[data-automation-id="postalCode"], input[data-automation-id*="postalCode" i], input[data-automation-id*="postal" i], input[id*="postalCode" i]', p["zip_code"]),
                 ('input[data-automation-id="phone-number"], input[data-automation-id="contactInfoPhone-number"], input[type="tel"]', p["phone"]),
                 ('input[data-automation-id="email"]', p["email"]),
             ]
@@ -321,6 +321,57 @@ class FormAutoFiller:
                         if "minor outlying" in txt:
                             continue
                         if "united states of america" in txt or txt == "united states" or txt == "usa":
+                            opt.click()
+                            opt_clicked = True
+                            filled += 1
+                            break
+
+                    if not opt_clicked:
+                        page.keyboard.press("Enter")
+                        filled += 1
+                    time.sleep(0.4)
+                    break
+        except Exception:
+            pass
+
+        # Dedicated Workday Region / State Dropdown Handler
+        try:
+            region_btn_selectors = [
+                'button[data-automation-id="addressSection_countryRegion"]',
+                'button[data-automation-id*="countryRegion"]',
+                'div[data-automation-id="formField-addressSection_countryRegion"] button',
+                'div[data-automation-id*="countryRegion"] button',
+                'div[data-automation-id*="formField-region" i] button',
+                'button[data-automation-id*="region" i]',
+                'button[aria-haspopup="listbox"][data-automation-id*="region" i]',
+                'button[aria-haspopup="listbox"][data-automation-id*="state" i]',
+            ]
+            for r_sel in region_btn_selectors:
+                r_btn = page.query_selector(r_sel)
+                if r_btn and r_btn.is_visible():
+                    curr_txt = (r_btn.inner_text() or "").strip().lower()
+                    target_state = p["state_full"] or p["state"]
+                    if target_state.lower() in curr_txt or (p["state"] and curr_txt == p["state"].lower()):
+                        break
+
+                    r_btn.click()
+                    time.sleep(0.4)
+
+                    search_box = page.query_selector('input[data-automation-id="searchBox"], input[role="searchbox"]')
+                    if search_box and search_box.is_visible():
+                        search_box.fill(target_state)
+                        time.sleep(0.3)
+                        page.keyboard.press("Enter")
+                        time.sleep(0.4)
+                    else:
+                        page.keyboard.type(target_state, delay=20)
+                        time.sleep(0.3)
+
+                    options = page.query_selector_all('[data-automation-id="promptOption"], [role="option"], div[id*="promptOption"]')
+                    opt_clicked = False
+                    for opt in options:
+                        txt = (opt.inner_text() or opt.get_attribute("data-automation-label") or "").strip().lower()
+                        if target_state.lower() in txt or (p["state"] and txt == p["state"].lower()):
                             opt.click()
                             opt_clicked = True
                             filled += 1
@@ -558,12 +609,15 @@ class FormAutoFiller:
             (re.compile(r"\b(e-?mail|email\s*address|useremail)\b", re.I), p["email"]),
             (re.compile(r"\b(phone|mobile|cell|telephone|contact\s*num)\b", re.I), p["phone"]),
             (re.compile(r"\b(birth\s*date|dob|date\s*of\s*birth|birthday)\b", re.I), p.get("dob_picker") or p["dob_formatted"]),
-            (re.compile(r"\b(current\s*address|home\s*address|street\s*address|address\s*line\s*1|address1|address)\b", re.I), p.get("full_address") or p["street_address"]),
-            (re.compile(r"\b(address\s*line\s*2|address2|suite|apt|apartment|unit)\b", re.I), p["address_line2"]),
+            # Sub-address components take strict precedence over generic address
             (re.compile(r"\b(city|town|municipality)\b", re.I), p["city"]),
+            (re.compile(r"\b(zip\s*code|postal\s*code|postcode|\bzip\b|\bpostal\b)\b", re.I), p["zip_code"]),
+            (re.compile(r"\b(address\s*line\s*2|address2|suite|apt|apartment|unit)\b", re.I), p["address_line2"]),
             (re.compile(r"\b(state|province|region)\b", re.I), p["state"]),
-            (re.compile(r"\b(zip\s*code|postal\s*code|postcode|zip)\b", re.I), p["zip_code"]),
-            (re.compile(r"\b(country)\b", re.I), p["country"]),
+            (re.compile(r"\b(country|nation)\b", re.I), p["country"]),
+            # Specific Street Address / Address Line 1: Use street_address only, NOT full_address
+            (re.compile(r"\b(street\s*address|address\s*line\s*1|address1|address_1|addressline1)\b", re.I), p["street_address"]),
+            (re.compile(r"\b(full\s*address)\b", re.I), p.get("full_address") or p["street_address"]),
             (re.compile(r"\b(university|school|college|institution|alma\s*mater)\b", re.I), p["university"]),
             (re.compile(r"\b(major|discipline|field\s*of\s*study|degree\s*subject|program)\b", re.I), p["major"]),
             (re.compile(r"\b(degree|education\s*level)\b", re.I), p["degree"]),
@@ -703,11 +757,12 @@ class FormAutoFiller:
                                     break
 
                         # State
-                        elif re.search(r"\b(state|province)\b", context, re.I):
+                        # State / Region
+                        elif re.search(r"\b(state|province|region)\b", context, re.I):
                             for opt in sel.query_selector_all("option"):
                                 txt = (opt.text_content() or "").lower()
                                 val = (opt.get_attribute("value") or "").lower()
-                                if p["state"].lower() == val or p["state_full"].lower() in txt:
+                                if p["state"].lower() == val or p["state_full"].lower() in txt or val == p["state"].lower():
                                     sel.select_option(value=opt.get_attribute("value") or opt.text_content())
                                     filled += 1
                                     break
@@ -748,8 +803,10 @@ class FormAutoFiller:
 
                         target_val = None
                         is_country = False
-                        if re.search(r"\b(state|province)\b", context, re.I):
+                        is_state = False
+                        if re.search(r"\b(state|province|region|countryregion)\b", context, re.I):
                             target_val = p["state_full"]
+                            is_state = True
                         elif re.search(r"\b(country|nation)\b", context, re.I):
                             target_val = "United States of America"
                             is_country = True
@@ -761,9 +818,11 @@ class FormAutoFiller:
                             target_val = "No"
 
                         if target_val:
-                            # Skip if country is already selected as USA and not minor outlying
                             curr_val = (combo.inner_text() or "").strip().lower()
+                            # Skip if already set
                             if is_country and ("united states" in curr_val or "usa" in curr_val) and "minor outlying" not in curr_val:
+                                continue
+                            if is_state and (p["state_full"].lower() in curr_val or (p["state"] and curr_val == p["state"].lower())):
                                 continue
 
                             combo.click()
@@ -774,13 +833,12 @@ class FormAutoFiller:
                             if search_inp and search_inp.is_visible():
                                 search_inp.fill(target_val)
                                 time.sleep(0.3)
-                                if not is_country:
+                                if not is_country and not is_state:
                                     page.keyboard.press("Enter")
                             else:
                                 page.keyboard.type(target_val, delay=20)
                                 time.sleep(0.3)
 
-                            # If country, explicitly find and click the option that is NOT Minor Outlying Islands
                             if is_country:
                                 opt_clicked = False
                                 options = page.query_selector_all('[data-automation-id="promptOption"], [role="option"], div[id*="promptOption"], li[role="option"]')
@@ -789,6 +847,17 @@ class FormAutoFiller:
                                     if "minor outlying" in opt_txt:
                                         continue
                                     if "united states of america" in opt_txt or opt_txt == "united states" or opt_txt == "usa":
+                                        opt.click()
+                                        opt_clicked = True
+                                        break
+                                if not opt_clicked:
+                                    page.keyboard.press("Enter")
+                            elif is_state:
+                                opt_clicked = False
+                                options = page.query_selector_all('[data-automation-id="promptOption"], [role="option"], div[id*="promptOption"], li[role="option"]')
+                                for opt in options:
+                                    opt_txt = (opt.inner_text() or opt.get_attribute("data-automation-label") or "").strip().lower()
+                                    if p["state_full"].lower() in opt_txt or (p["state"] and opt_txt == p["state"].lower()):
                                         opt.click()
                                         opt_clicked = True
                                         break

@@ -341,6 +341,58 @@ class TestAutofillEngine(unittest.TestCase):
 
             browser.close()
 
+    def test_workday_address_subfields_not_overwritten_by_section_heading(self):
+        """Verify Address section heading does not cause City, Postal Code, or Line 1 to be filled with full address."""
+        filler = FormAutoFiller(headless=True)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+
+            # Exact HTML structure as seen on Workday address section
+            page.set_content("""
+            <html>
+                <body>
+                    <div class="address-section">
+                        <h3>Address</h3>
+                        <div class="form-group" data-automation-id="formField-region">
+                            <label>Region</label>
+                            <select id="region">
+                                <option value="">Select One</option>
+                                <option value="VA">Virginia</option>
+                                <option value="CA">California</option>
+                            </select>
+                        </div>
+                        <div class="form-group" data-automation-id="formField-city">
+                            <label>City</label>
+                            <input type="text" id="city" />
+                        </div>
+                        <div class="form-group" data-automation-id="formField-postalCode">
+                            <label>Postal Code</label>
+                            <input type="text" id="postalCode" />
+                        </div>
+                        <div class="form-group" data-automation-id="formField-addressLine1">
+                            <label>Address Line 1</label>
+                            <input type="text" id="addressLine1" />
+                        </div>
+                    </div>
+                </body>
+            </html>
+            """)
+
+            filler.fill_generic_heuristics(page)
+
+            city_val = page.input_value("#city")
+            postal_val = page.input_value("#postalCode")
+            line1_val = page.input_value("#addressLine1")
+            region_val = page.eval_on_selector("#region", "el => el.value")
+
+            self.assertEqual(city_val, filler.profile["city"], "City should contain city name, not full address")
+            self.assertEqual(postal_val, filler.profile["zip_code"], "Postal Code should contain zip code, not full address")
+            self.assertEqual(line1_val, filler.profile["street_address"], "Address Line 1 should contain street address only, not full address")
+            self.assertEqual(region_val, "VA", "Region dropdown should select user's state")
+
+            browser.close()
+
 
 class TestGitHubScraper(unittest.TestCase):
     def setUp(self):
